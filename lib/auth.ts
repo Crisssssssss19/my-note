@@ -1,3 +1,4 @@
+// lib/auth.ts - VERSIÓN CORREGIDA SIN DUPLICACIONES
 export interface User {
   id: string
   email: string
@@ -30,22 +31,28 @@ export class AuthService {
   private loadUser(): void {
     if (typeof window === "undefined") return
 
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY)
-    if (stored) {
-      const userData = JSON.parse(stored)
-      this.currentUser = {
-        ...userData,
-        createdAt: new Date(userData.createdAt),
+    const token = localStorage.getItem(AUTH_STORAGE_KEY)
+    if (token) {
+      try {
+        // Decode JWT payload to get user info (client-side only for UI)
+        const payload = JSON.parse(atob(token.split('.')[1]))
+        this.currentUser = {
+          ...payload.user,
+          createdAt: new Date(payload.user.createdAt)
+        }
+      } catch (error) {
+        console.error('Error al verificar token:', error)
+        localStorage.removeItem(AUTH_STORAGE_KEY)
       }
     }
   }
 
-  private saveUser(user: User): void {
+  private saveToken(token: string): void {
     if (typeof window === "undefined") return
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user))
+    localStorage.setItem(AUTH_STORAGE_KEY, token)
   }
 
-  private clearUser(): void {
+  private clearToken(): void {
     if (typeof window === "undefined") return
     localStorage.removeItem(AUTH_STORAGE_KEY)
   }
@@ -55,65 +62,81 @@ export class AuthService {
   }
 
   async login(email: string, password: string): Promise<{ success: boolean; error?: string }> {
-    // Simulate API call delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      })
 
-    // Simple validation - in real app, this would be server-side
-    if (!email || !password) {
-      return { success: false, error: "Email y contraseña son requeridos" }
+      const result = await response.json()
+
+      if (result.success && result.token) {
+        // Guardar el token
+        this.saveToken(result.token)
+        
+        // Establecer el usuario actual
+        this.currentUser = {
+          ...result.user,
+          createdAt: new Date(result.user.createdAt)
+        }
+        
+        return { success: true }
+      } else {
+        return { success: false, error: result.error || 'Error de autenticación' }
+      }
+    } catch (error) {
+      console.error('Error en login:', error)
+      return { success: false, error: "Error de conexión" }
     }
-
-    if (password.length < 6) {
-      return { success: false, error: "La contraseña debe tener al menos 6 caracteres" }
-    }
-
-    // Create user (in real app, this would validate against database)
-    const user: User = {
-      id: `user-${Date.now()}`,
-      email,
-      name: email.split("@")[0],
-      createdAt: new Date(),
-    }
-
-    this.currentUser = user
-    this.saveUser(user)
-
-    return { success: true }
   }
 
   async register(email: string, password: string, name: string): Promise<{ success: boolean; error?: string }> {
-    // Simulate API call delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password, name }),
+      })
 
-    // Simple validation
-    if (!email || !password || !name) {
-      return { success: false, error: "Todos los campos son requeridos" }
+      const result = await response.json()
+
+      if (result.success && result.token) {
+        // Guardar el token
+        this.saveToken(result.token)
+        
+        // Establecer el usuario actual
+        this.currentUser = {
+          ...result.user,
+          createdAt: new Date(result.user.createdAt)
+        }
+        
+        return { success: true }
+      } else {
+        return { success: false, error: result.error || 'Error de registro' }
+      }
+    } catch (error) {
+      console.error('Error en register:', error)
+      return { success: false, error: "Error de conexión" }
     }
-
-    if (password.length < 6) {
-      return { success: false, error: "La contraseña debe tener al menos 6 caracteres" }
-    }
-
-    // Create user
-    const user: User = {
-      id: `user-${Date.now()}`,
-      email,
-      name,
-      createdAt: new Date(),
-    }
-
-    this.currentUser = user
-    this.saveUser(user)
-
-    return { success: true }
   }
 
   logout(): void {
     this.currentUser = null
-    this.clearUser()
+    this.clearToken()
   }
 
   isAuthenticated(): boolean {
     return this.currentUser !== null
+  }
+
+  // Get token for API calls
+  getToken(): string | null {
+    if (typeof window === "undefined") return null
+    return localStorage.getItem(AUTH_STORAGE_KEY)
   }
 }
