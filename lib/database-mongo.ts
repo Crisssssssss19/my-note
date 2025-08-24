@@ -1,7 +1,6 @@
-// lib/database-mongo.ts - VERSIÓN CORREGIDA
+// lib/database-mongo.ts - VERSIÓN CORREGIDA CON TIPOS DE MONGOOSE
 import dbConnect from "./mongodb";
 import {
-  User,
   Page,
   Comment,
   ActivityLog,
@@ -15,6 +14,65 @@ import type {
   ActivityLog as ActivityLogType,
   SharedPage as SharedPageType,
 } from "./types";
+
+// Extender los tipos de Mongoose para incluir _id y manejar las diferencias
+interface PageDocument {
+  _id: string;
+  title: string;
+  content: MongooseNotionBlock[];
+  parentId?: string | null;
+  userId: string;
+  emoji?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Tipo para los bloques como vienen de MongoDB
+interface MongooseNotionBlock {
+  id: string;
+  type: NotionBlock["type"];
+  content: string;
+  children?: MongooseNotionBlock[];
+  formatting?: {
+    bold?: boolean | null;
+    italic?: boolean | null;
+    underline?: boolean | null;
+    strikethrough?: boolean | null;
+    code?: boolean | null;
+  } | null;
+}
+
+interface CommentDocument {
+  _id: string;
+  blockId: string;
+  pageId: string;
+  userId: string;
+  userName: string;
+  content: string;
+  createdAt: Date;
+  resolved: boolean;
+}
+
+interface SharedPageDocument {
+  _id: string;
+  pageId: string;
+  shareId: string;
+  permissions: "read" | "write";
+  createdBy: string;
+  createdAt: Date;
+  expiresAt?: Date | null;
+}
+
+interface ActivityLogDocument {
+  _id: string;
+  userId: string;
+  userName: string;
+  action: ActivityLogType["action"];
+  pageId: string;
+  pageTitle: string;
+  timestamp: Date;
+  details?: string | null;
+}
 
 export class MongoDatabase {
   private static instance: MongoDatabase;
@@ -37,17 +95,35 @@ export class MongoDatabase {
     }
   }
 
-  private transformPage(page: any): NotionPage {
+  private transformPage(page: PageDocument | null): NotionPage | null {
     if (!page) return null;
+
+    // Función auxiliar para transformar bloques recursivamente
+    const transformBlock = (block: MongooseNotionBlock): NotionBlock => ({
+      id: block.id,
+      type: block.type,
+      content: block.content || "",
+      children: block.children ? block.children.map(transformBlock) : undefined,
+      formatting: block.formatting ? {
+        bold: block.formatting.bold || undefined,
+        italic: block.formatting.italic || undefined,
+        underline: block.formatting.underline || undefined,
+        strikethrough: block.formatting.strikethrough || undefined,
+        code: block.formatting.code || undefined,
+      } : undefined,
+    });
+
+    // Transformar el contenido para manejar las diferencias de tipos
+    const transformedContent: NotionBlock[] = page.content.map(transformBlock);
 
     return {
       id: page._id.toString(),
       title: page.title || "Sin título",
-      content: page.content || [],
-      parentId: page.parentId?.toString(),
+      content: transformedContent,
+      parentId: page.parentId?.toString() || undefined,
       createdAt: new Date(page.createdAt),
       updatedAt: new Date(page.updatedAt),
-      emoji: page.emoji,
+      emoji: page.emoji || undefined,
     };
   }
 
@@ -80,8 +156,8 @@ export class MongoDatabase {
   async getAllPages(userId: string): Promise<NotionPage[]> {
     try {
       await this.connect();
-      const pages = await Page.find({ userId }).sort({ createdAt: -1 }).lean();
-      return pages.map(this.transformPage).filter(Boolean);
+      const pages = await Page.find({ userId }).sort({ createdAt: -1 }).lean<PageDocument[]>();
+      return pages.map(this.transformPage).filter((page): page is NotionPage => page !== null);
     } catch (error) {
       console.error("Error getting pages:", error);
       return [];
@@ -97,8 +173,9 @@ export class MongoDatabase {
         return undefined;
       }
 
-      const page = await Page.findOne({ _id: id, userId }).lean();
-      return page ? this.transformPage(page) : undefined;
+      const page = await Page.findOne({ _id: id, userId }).lean<PageDocument>();
+      const transformedPage = page ? this.transformPage(page) : null;
+      return transformedPage || undefined;
     } catch (error) {
       console.error("Error getting page:", error);
       return undefined;
@@ -117,16 +194,10 @@ export class MongoDatabase {
       const page = await Page.findOne({
         _id: workspace.currentPageId,
         userId,
-      }).lean<{
-        _id: string;
-        title: string;
-        content: NotionBlock[]; // ⬅️ acá en lugar de any[]
-        createdAt: Date;
-        updatedAt: Date;
-        emoji?: string;
-      }>();
+      }).lean<PageDocument>();
 
-      return page ? this.transformPage(page) : undefined;
+      const transformedPage = page ? this.transformPage(page) : null;
+      return transformedPage || undefined;
     } catch (error) {
       console.error("Error getting current page:", error);
       return undefined;
@@ -187,7 +258,11 @@ export class MongoDatabase {
         savedPage.title
       );
 
-      return this.transformPage(savedPage.toObject());
+      const transformedPage = this.transformPage(savedPage.toObject() as PageDocument);
+      if (!transformedPage) {
+        throw new Error("Failed to transform created page");
+      }
+      return transformedPage;
     } catch (error) {
       console.error("Error creating page:", error);
       throw new Error("Failed to create page");
@@ -315,7 +390,8 @@ export class MongoDatabase {
       });
 
       const savedPage = await duplicatedPage.save();
-      return this.transformPage(savedPage.toObject());
+      const transformedPage = this.transformPage(savedPage.toObject() as PageDocument);
+      return transformedPage || undefined;
     } catch (error) {
       console.error("Error duplicating page:", error);
       return undefined;
@@ -417,7 +493,7 @@ export class MongoDatabase {
 
       const comments = await Comment.find({ pageId: { $in: pageIds } })
         .sort({ createdAt: -1 })
-        .lean();
+        .lean<CommentDocument[]>();
 
       return comments.map((comment) => ({
         id: comment._id.toString(),
@@ -535,7 +611,7 @@ export class MongoDatabase {
 
       const sharedPages = await SharedPage.find({ pageId: { $in: pageIds } })
         .sort({ createdAt: -1 })
-        .lean();
+        .lean<SharedPageDocument[]>();
 
       return sharedPages.map((share) => ({
         id: share._id.toString(),
@@ -569,7 +645,7 @@ export class MongoDatabase {
       const activities = await ActivityLog.find({ userId })
         .sort({ timestamp: -1 })
         .limit(100)
-        .lean();
+        .lean<ActivityLogDocument[]>();
 
       return activities.map((activity) => ({
         id: activity._id.toString(),
@@ -579,7 +655,7 @@ export class MongoDatabase {
         pageId: activity.pageId.toString(),
         pageTitle: activity.pageTitle,
         timestamp: new Date(activity.timestamp),
-        details: activity.details,
+        details: activity.details || undefined,
       }));
     } catch (error) {
       console.error("Error getting activity log:", error);
@@ -598,8 +674,8 @@ export class MongoDatabase {
 
       const pages = await Page.find({ parentId, userId })
         .sort({ createdAt: -1 })
-        .lean();
-      return pages.map(this.transformPage).filter(Boolean);
+        .lean<PageDocument[]>();
+      return pages.map(this.transformPage).filter((page): page is NotionPage => page !== null);
     } catch (error) {
       console.error("Error getting child pages:", error);
       return [];
@@ -614,8 +690,8 @@ export class MongoDatabase {
         $or: [{ parentId: { $exists: false } }, { parentId: null }],
       })
         .sort({ createdAt: -1 })
-        .lean();
-      return pages.map(this.transformPage).filter(Boolean);
+        .lean<PageDocument[]>();
+      return pages.map(this.transformPage).filter((page): page is NotionPage => page !== null);
     } catch (error) {
       console.error("Error getting root pages:", error);
       return [];
@@ -641,9 +717,9 @@ export class MongoDatabase {
       })
         .sort({ updatedAt: -1 })
         .limit(50)
-        .lean();
+        .lean<PageDocument[]>();
 
-      return pages.map(this.transformPage).filter(Boolean);
+      return pages.map(this.transformPage).filter((page): page is NotionPage => page !== null);
     } catch (error) {
       console.error("Error searching pages:", error);
       return [];
@@ -706,7 +782,7 @@ export class MongoDatabase {
         savedPage.title
       );
 
-      return this.transformPage(savedPage.toObject());
+      return this.transformPage(savedPage.toObject() as PageDocument);
     } catch (error) {
       console.error("Error initializing user workspace:", error);
       return null;
