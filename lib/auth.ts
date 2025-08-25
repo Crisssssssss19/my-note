@@ -1,4 +1,3 @@
-// lib/auth.ts - VERSIÓN CORREGIDA SIN DUPLICACIONES
 export interface User {
   id: string
   email: string
@@ -34,14 +33,32 @@ export class AuthService {
     const token = localStorage.getItem(AUTH_STORAGE_KEY)
     if (token) {
       try {
-        // Decode JWT payload to get user info (client-side only for UI)
-        const payload = JSON.parse(atob(token.split('.')[1]))
-        this.currentUser = {
-          ...payload.user,
-          createdAt: new Date(payload.user.createdAt)
+        // Validate token format (should have 3 parts)
+        const parts = token.split('.')
+        if (parts.length !== 3) {
+          console.warn('Invalid token format')
+          localStorage.removeItem(AUTH_STORAGE_KEY)
+          return
+        }
+
+        // Decode JWT payload to get user info
+        const payload = JSON.parse(atob(parts[1]))
+        
+        // Check if token is expired
+        if (payload.exp && payload.exp * 1000 < Date.now()) {
+          console.warn('Token expired')
+          localStorage.removeItem(AUTH_STORAGE_KEY)
+          return
+        }
+
+        if (payload.user) {
+          this.currentUser = {
+            ...payload.user,
+            createdAt: new Date(payload.user.createdAt)
+          }
         }
       } catch (error) {
-        console.error('Error al verificar token:', error)
+        console.error('Error loading user from token:', error)
         localStorage.removeItem(AUTH_STORAGE_KEY)
       }
     }
@@ -73,11 +90,11 @@ export class AuthService {
 
       const result = await response.json()
 
-      if (result.success && result.token) {
-        // Guardar el token
+      if (response.ok && result.success && result.token) {
+        // Save token
         this.saveToken(result.token)
         
-        // Establecer el usuario actual
+        // Set current user
         this.currentUser = {
           ...result.user,
           createdAt: new Date(result.user.createdAt)
@@ -105,11 +122,11 @@ export class AuthService {
 
       const result = await response.json()
 
-      if (result.success && result.token) {
-        // Guardar el token
+      if (response.ok && result.success && result.token) {
+        // Save token
         this.saveToken(result.token)
         
-        // Establecer el usuario actual
+        // Set current user
         this.currentUser = {
           ...result.user,
           createdAt: new Date(result.user.createdAt)

@@ -33,7 +33,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  pages,
+  pages = [], // ✅ Default value to prevent undefined
   currentPageId,
   onSelectPage,
   onCreatePage,
@@ -44,11 +44,14 @@ export function Sidebar({
   const [searchTerm, setSearchTerm] = useState("")
   const [expandedPages, setExpandedPages] = useState<Set<string>>(new Set())
 
-  const rootPages = pages.filter((page) => !page.parentId)
-  const getChildPages = (parentId: string) => pages.filter((page) => page.parentId === parentId)
+  // ✅ Safety check for pages array
+  const safePages = Array.isArray(pages) ? pages : []
+  
+  const rootPages = safePages.filter((page) => !page.parentId)
+  const getChildPages = (parentId: string) => safePages.filter((page) => page.parentId === parentId)
 
   const filteredPages = searchTerm
-    ? pages.filter((page) => page.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    ? safePages.filter((page) => page.title.toLowerCase().includes(searchTerm.toLowerCase()))
     : rootPages
 
   const toggleExpanded = (pageId: string) => {

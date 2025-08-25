@@ -1,11 +1,12 @@
-// lib/database.ts - VERSIÓN CORREGIDA PARA FRONTEND
 import type { NotionPage, Comment, ActivityLog, SharedPage } from "./types";
+
 export interface WorkspaceData {
   pages: NotionPage[];
   comments: Comment[];
   activityLog: ActivityLog[];
   sharedPages: SharedPage[];
 }
+
 export class LocalDatabase {
   private static instance: LocalDatabase;
 
@@ -21,7 +22,7 @@ export class LocalDatabase {
   private getAuthHeaders() {
     const token = localStorage.getItem("notion-clone-auth");
     if (!token) {
-      throw new Error("No hay token de autenticación");
+      throw new Error("No authentication token found");
     }
     return {
       Authorization: `Bearer ${token}`,
@@ -31,20 +32,27 @@ export class LocalDatabase {
 
   private async apiCall(url: string, options?: RequestInit) {
     try {
+      const headers = this.getAuthHeaders();
+      
       const response = await fetch(url, {
         ...options,
         headers: {
-          ...this.getAuthHeaders(),
+          ...headers,
           ...options?.headers,
         },
       });
 
+      if (response.status === 401) {
+        // Token invalid or expired, clear it and redirect to login
+        localStorage.removeItem("notion-clone-auth");
+        window.location.reload(); // This will trigger the auth guard
+        throw new Error("Authentication expired");
+      }
+
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.error || `API call failed: ${response.statusText}`
-        );
+        throw new Error(data.error || `API call failed: ${response.statusText}`);
       }
 
       return data;
@@ -67,7 +75,7 @@ export class LocalDatabase {
   async getPage(id: string): Promise<NotionPage | undefined> {
     try {
       if (!id || id === "undefined") return undefined;
-      const data = await this.apiCall(`/api/pages/${id}`);
+      const data = await this.apiCall(`/api/page/${id}`);
       return data.page;
     } catch (error) {
       console.error("Error getting page:", error);
@@ -76,7 +84,6 @@ export class LocalDatabase {
   }
 
   async getCurrentPage(): Promise<NotionPage | undefined> {
-    // Para el cliente, mantenemos la página actual en localStorage temporalmente
     const currentPageId = localStorage.getItem("current-page-id");
     if (!currentPageId || currentPageId === "undefined") return undefined;
     return this.getPage(currentPageId);
@@ -103,7 +110,6 @@ export class LocalDatabase {
         }),
       });
 
-      // Establecer como página actual
       if (data.page?.id) {
         this.setCurrentPage(data.page.id);
       }
@@ -123,15 +129,14 @@ export class LocalDatabase {
   ): Promise<void> {
     try {
       if (!id || id === "undefined") {
-        throw new Error("ID de página inválido");
+        throw new Error("Invalid page ID");
       }
 
-      // Limpiar el objeto de actualizaciones
       const cleanUpdates = { ...updates };
       delete cleanUpdates.id;
       delete cleanUpdates.createdAt;
 
-      await this.apiCall(`/api/pages/${id}`, {
+      await this.apiCall(`/api/page/${id}`, {
         method: "PUT",
         body: JSON.stringify(cleanUpdates),
       });
@@ -148,14 +153,13 @@ export class LocalDatabase {
   ): Promise<void> {
     try {
       if (!id || id === "undefined") {
-        throw new Error("ID de página inválido");
+        throw new Error("Invalid page ID");
       }
 
-      await this.apiCall(`/api/pages/${id}`, {
+      await this.apiCall(`/api/page/${id}`, {
         method: "DELETE",
       });
 
-      // Limpiar página actual si fue eliminada
       const currentPageId = localStorage.getItem("current-page-id");
       if (currentPageId === id) {
         localStorage.removeItem("current-page-id");
@@ -170,7 +174,7 @@ export class LocalDatabase {
     try {
       if (!id || id === "undefined") return undefined;
 
-      const data = await this.apiCall(`/api/pages/${id}/duplicate`, {
+      const data = await this.apiCall(`/api/page/${id}/duplicate`, {
         method: "POST",
       });
       return data.page;
@@ -183,10 +187,10 @@ export class LocalDatabase {
   async movePageToParent(pageId: string, newParentId?: string): Promise<void> {
     try {
       if (!pageId || pageId === "undefined") {
-        throw new Error("ID de página inválido");
+        throw new Error("Invalid page ID");
       }
 
-      await this.apiCall(`/api/pages/${pageId}/move`, {
+      await this.apiCall(`/api/page/${pageId}/move`, {
         method: "PUT",
         body: JSON.stringify({
           parentId: newParentId || undefined,
@@ -207,7 +211,7 @@ export class LocalDatabase {
   ): Promise<Comment> {
     try {
       if (!pageId || pageId === "undefined") {
-        throw new Error("ID de página inválido");
+        throw new Error("Invalid page ID");
       }
 
       const data = await this.apiCall("/api/comments", {
@@ -238,7 +242,7 @@ export class LocalDatabase {
   async resolveComment(commentId: string): Promise<void> {
     try {
       if (!commentId || commentId === "undefined") {
-        throw new Error("ID de comentario inválido");
+        throw new Error("Invalid comment ID");
       }
 
       await this.apiCall(`/api/comments/${commentId}/resolve`, {
@@ -253,7 +257,7 @@ export class LocalDatabase {
   async deleteComment(commentId: string): Promise<void> {
     try {
       if (!commentId || commentId === "undefined") {
-        throw new Error("ID de comentario inválido");
+        throw new Error("Invalid comment ID");
       }
 
       await this.apiCall(`/api/comments/${commentId}`, {
@@ -273,7 +277,7 @@ export class LocalDatabase {
   ): Promise<SharedPage> {
     try {
       if (!pageId || pageId === "undefined") {
-        throw new Error("ID de página inválido");
+        throw new Error("Invalid page ID");
       }
 
       const data = await this.apiCall("/api/share", {
@@ -300,7 +304,7 @@ export class LocalDatabase {
   async revokeShare(shareId: string): Promise<void> {
     try {
       if (!shareId) {
-        throw new Error("ID de compartición inválido");
+        throw new Error("Invalid share ID");
       }
 
       await this.apiCall(`/api/share/${shareId}`, {
@@ -349,7 +353,7 @@ export class LocalDatabase {
       if (!query || query.trim().length === 0) return [];
 
       const data = await this.apiCall(
-        `/api/pages/search?q=${encodeURIComponent(query.trim())}`
+        `/api/page/search?q=${encodeURIComponent(query.trim())}`
       );
       return data.pages || [];
     } catch (error) {
@@ -358,11 +362,7 @@ export class LocalDatabase {
     }
   }
 
-  // Métodos de compatibilidad que no están implementados en el backend
-  // pero que pueden ser necesarios para el frontend existente
-
   async getWorkspace(): Promise<WorkspaceData> {
-    // Implementación simplificada usando localStorage para compatibilidad
     return {
       pages: await this.getAllPages(),
       comments: await this.getComments(),

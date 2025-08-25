@@ -1,4 +1,4 @@
-// middleware.ts - VERSIÓN CORREGIDA
+// middleware.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { ServerAuth } from '@/lib/server-auth'
 
@@ -41,6 +41,7 @@ export function middleware(request: NextRequest) {
   return NextResponse.next()
 }
 
+// 👇 Esto siempre va al final
 export const config = {
   matcher: '/api/:path*'
 }

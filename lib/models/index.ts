@@ -9,7 +9,6 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true, minlength: 6 },
   createdAt: { type: Date, default: Date.now }
 })
-userSchema.index({ email: 1 })
 export type UserDoc = InferSchemaType<typeof userSchema>
 
 // =======================
@@ -93,7 +92,6 @@ const sharedPageSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, default: null }
 })
-sharedPageSchema.index({ shareId: 1 })
 sharedPageSchema.index({ pageId: 1 })
 sharedPageSchema.index({ createdBy: 1 })
 export type SharedPageDoc = InferSchemaType<typeof sharedPageSchema>
@@ -111,7 +109,6 @@ const workspaceSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 })
-workspaceSchema.index({ userId: 1 })
 export type WorkspaceDoc = InferSchemaType<typeof workspaceSchema>
 
 // =======================
